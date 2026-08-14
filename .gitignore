@@ -3,3 +3,4 @@ __pycache__
 .*.swp
 crab_projects/
 *_cfg.py
+crab.log
