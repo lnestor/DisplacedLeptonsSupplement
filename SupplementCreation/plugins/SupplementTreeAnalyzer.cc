@@ -256,6 +256,13 @@ private:
   std::vector<int> Muon_timeNdof_;
   std::vector<float> Muon_timeAtIpInOut_;
 
+  // Muon_dxybsErr -- present in central NanoAOD from 2024 on (edB('BS2D') in
+  // muons_cff.py) but missing from the 2022/2023 muonTable config, even
+  // though the underlying pat::Muon already has it embedded from MiniAOD
+  // production (same embedding that backs the always-present Muon_dxybs).
+  // Filled here for all years so a single supplement schema covers both.
+  std::vector<float> Muon_dxybsErr_;
+
   // Electron -- OSUNano custom_osu_cff.py add_electron_vars() additions, not
   // present in central NanoAOD's electronTable
   std::vector<float> Electron_pfIso03_sumChargedHadronPt_, Electron_pfIso03_sumPUPt_, Electron_pfIso03_sumNeutralEt_;
@@ -314,6 +321,7 @@ void SupplementTreeAnalyzer::beginJob() {
   eventsTree_->Branch("Muon_pfIso04_sumNeutralEt", &Muon_pfIso04_sumNeutralEt_);
   eventsTree_->Branch("Muon_timeNdof", &Muon_timeNdof_);
   eventsTree_->Branch("Muon_timeAtIpInOut", &Muon_timeAtIpInOut_);
+  eventsTree_->Branch("Muon_dxybsErr", &Muon_dxybsErr_);
 
   eventsTree_->Branch("Electron_pfIso03_sumChargedHadronPt", &Electron_pfIso03_sumChargedHadronPt_);
   eventsTree_->Branch("Electron_pfIso03_sumPUPt", &Electron_pfIso03_sumPUPt_);
@@ -351,6 +359,7 @@ void SupplementTreeAnalyzer::fillMuons(const edm::Event& iEvent) {
   Muon_pfIso04_sumNeutralEt_.clear();
   Muon_timeNdof_.clear();
   Muon_timeAtIpInOut_.clear();
+  Muon_dxybsErr_.clear();
 
   edm::Handle<edm::RefVector<std::vector<pat::Muon>>> muons;
   iEvent.getByToken(muonToken_, muons);
@@ -360,6 +369,7 @@ void SupplementTreeAnalyzer::fillMuons(const edm::Event& iEvent) {
     Muon_pfIso04_sumChargedHadronPt_.push_back(mu.pfIsolationR04().sumChargedHadronPt);
     Muon_pfIso04_sumPUPt_.push_back(mu.pfIsolationR04().sumPUPt);
     Muon_pfIso04_sumNeutralEt_.push_back(mu.pfIsolationR04().sumNeutralHadronEt + mu.pfIsolationR04().sumPhotonEt);
+    Muon_dxybsErr_.push_back(mu.edB(pat::Muon::BS2D));
     Muon_timeNdof_.push_back(mu.time().nDof);
     Muon_timeAtIpInOut_.push_back(mu.time().timeAtIpInOut);
   }

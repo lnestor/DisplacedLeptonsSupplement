@@ -206,9 +206,6 @@ def main():
             print(f"  {state}: {pct}% ({count}/{total})")
 
         dest_dir = os.path.join(args.supplements_dir, dest_name_for(crab_dir))
-        if not try_remove(dest_dir, args.dry_run):
-            errors.append(crab_dir)
-            continue
 
         if not is_fully_finished(states):
             not_finished.append(crab_dir)

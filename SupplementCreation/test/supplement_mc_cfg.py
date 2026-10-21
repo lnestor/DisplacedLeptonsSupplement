@@ -14,6 +14,12 @@ options.register(
     VarParsing.VarParsing.varType.string,
     "GlobalTag matching the input MiniAOD's conditions",
 )
+options.register(
+    "recomputeMuonIds", False,
+    VarParsing.VarParsing.multiplicity.singleton,
+    VarParsing.VarParsing.varType.bool,
+    "Recompute muon cut-based ID selector bits from the MiniAOD",
+)
 options.parseArguments()
 
 process = cms.Process("SUPPLEMENT")
@@ -35,7 +41,8 @@ process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(-1))
 
 process.source = cms.Source("PoolSource",
     fileNames = cms.untracked.vstring(
-        "/store/mc/RunIII2024Summer24MiniAODv6/DYto2E-4Jets_Bin-MLL-50_TuneCP5_13p6TeV_madgraphMLM-pythia8/MINIAODSIM/150X_mcRun3_2024_realistic_v2-v3/2530000/ae7e01ea-f7a0-470f-90c6-4fa1c2ea6904.root"
+        options.inputFiles if options.inputFiles else
+        ["/store/mc/RunIII2024Summer24MiniAODv6/DYto2E-4Jets_Bin-MLL-50_TuneCP5_13p6TeV_madgraphMLM-pythia8/MINIAODSIM/150X_mcRun3_2024_realistic_v2-v3/2530000/ae7e01ea-f7a0-470f-90c6-4fa1c2ea6904.root"]
     ),
 )
 
@@ -55,8 +62,16 @@ process.supplementTriggerFilter = hlt.hltHighLevel.clone(
     throw = cms.bool(False),
 )
 
-process.finalMuons = cms.EDFilter("PATMuonRefSelector",
+process.slimmedMuonsUpdated = cms.EDProducer("PATMuonUpdater",
     src = cms.InputTag("slimmedMuons"),
+    vertices = cms.InputTag("offlineSlimmedPrimaryVertices"),
+    fixDxySign = cms.bool(True),
+    recomputeMuonBasicSelectors = cms.bool(options.recomputeMuonIds),
+    recomputeSoftMuonMvaRun3 = cms.bool(False),
+)
+
+process.finalMuons = cms.EDFilter("PATMuonRefSelector",
+    src = cms.InputTag("slimmedMuonsUpdated"),
     cut = cms.string("pt > 15 || (pt > 3 && (passed('CutBasedIdLoose') || passed('SoftCutBasedId') || passed('SoftMvaId') || passed('CutBasedIdGlobalHighPt') || passed('CutBasedIdTrkHighPt')))"),
 )
 
@@ -80,5 +95,5 @@ process.TFileService = cms.Service("TFileService",
     fileName = cms.string("supplement.root"),
 )
 
-process.p = cms.Path(process.supplementTriggerFilter + process.finalMuons + process.finalElectrons +
+process.p = cms.Path(process.supplementTriggerFilter + process.slimmedMuonsUpdated + process.finalMuons + process.finalElectrons +
                       process.finalGenParticles + process.supplementTree)

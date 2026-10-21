@@ -10,9 +10,11 @@ config.General.transferLogs = True
 
 config.JobType.pluginName = 'Analysis'
 config.JobType.psetName = 'supplement_ee_cfg.py'
+config.JobType.pyCfgParams = ['globalTag=150X_dataRun3_Prompt_v1', 'lowerMuonPtThreshold=True', 'egamma2025PtBoundaryFix=True']
 config.JobType.outputFiles = ['supplement.root']
 config.JobType.maxMemoryMB = 3000
 config.JobType.numCores = 1
+config.JobType.priority = 10
 
 config.Data.inputDataset = '/EGamma0/Run2025F-PromptReco-v1/MINIAOD'
 config.Data.inputDBS = 'global'

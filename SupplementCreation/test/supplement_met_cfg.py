@@ -13,7 +13,16 @@ options.register(
     VarParsing.VarParsing.varType.string,
     "GlobalTag matching the input MiniAOD's conditions",
 )
+options.register(
+    "lowerMuonPtThreshold", False,
+    VarParsing.VarParsing.multiplicity.singleton,
+    VarParsing.VarParsing.varType.bool,
+    "Lower the loose-muon pt threshold to 2 GeV, matching central NanoAOD's "
+    "run3_nanoAOD_2025 era modifier (2025+ data-taking)",
+)
 options.parseArguments()
+
+_muon_pt_threshold = 2 if options.lowerMuonPtThreshold else 3
 
 process = cms.Process("SUPPLEMENT")
 
@@ -50,7 +59,7 @@ process.supplementTriggerFilter = hlt.hltHighLevel.clone(
 
 process.finalMuons = cms.EDFilter("PATMuonRefSelector",
     src = cms.InputTag("slimmedMuons"),
-    cut = cms.string("pt > 15 || (pt > 3 && (passed('CutBasedIdLoose') || passed('SoftCutBasedId') || passed('SoftMvaId') || passed('CutBasedIdGlobalHighPt') || passed('CutBasedIdTrkHighPt')))"),
+    cut = cms.string("pt > 15 || (pt > {} && (passed('CutBasedIdLoose') || passed('SoftCutBasedId') || passed('SoftMvaId') || passed('CutBasedIdGlobalHighPt') || passed('CutBasedIdTrkHighPt')))".format(_muon_pt_threshold)),
 )
 
 process.finalElectrons = cms.EDFilter("PATElectronRefSelector",
