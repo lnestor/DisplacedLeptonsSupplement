@@ -65,6 +65,48 @@ config.Data.outputDatasetTag = '{{ request_name }}'
 config.Site.storageSite = 'T3_US_FNALLPC'
 """
 
+EOS_CRAB_TEMPLATE = """
+from CRABClient.UserUtilities import config
+
+config = config()
+
+config.General.requestName = '{{ request_name }}'
+config.General.workArea = 'crab_projects'
+config.General.transferOutputs = True
+config.General.transferLogs = True
+
+config.JobType.pluginName = 'Analysis'
+config.JobType.psetName = '{{ pset }}'
+config.JobType.pyCfgParams = {{ py_cfg_params }}
+config.JobType.outputFiles = ['supplement.root']
+config.JobType.maxMemoryMB = 2500
+config.JobType.maxJobRuntimeMin = 200
+config.JobType.numCores = 1
+config.JobType.priority = {{ priority }}
+
+config.Data.userInputFiles = {{ input_files }}
+config.Data.outputPrimaryDataset = '{{ primary_dataset }}'
+config.Data.splitting = 'FileBased'
+config.Data.unitsPerJob = 35
+config.Data.publication = False
+config.Data.outLFNDirBase = '/store/user/lnestor/'
+config.Data.outputDatasetTag = '{{ request_name }}'
+
+config.Site.storageSite = 'T3_US_FNALLPC'
+config.Site.whitelist = {{ whitelist }}
+"""
+
+EOS_REDIRECTOR = "root://cmseos.fnal.gov"
+
+# CRAB needs an explicit whitelist when running over userInputFiles (see the lpc-crab skill)
+EOS_SITE_WHITELIST = [
+    "T1_US_FNAL", "T1_FR_CCIN2P3", "T1_DE_KIT",
+    "T2_IT_Rome", "T2_FI_HIP", "T2_IT_Bari", "T2_FR_IPHC", "T2_IT_Legnaro", "T2_DE_RWTH",
+    "T2_UK_London_IC", "T2_CH_CSCS", "T2_DE_DESY", "T2_UK_SGrid_RALPP", "T2_US_Caltech",
+    "T2_US_Wisconsin", "T2_US_Purdue",
+    "T3_UK_London_QMUL", "T3_UK_London_RHUL", "T3_UK_SGrid_Oxford",
+]
+
 DATA_SAMPLES = ["EGamma", "MET", "MuonEG", "Muon"]
 
 SAMPLE_PSETS = {
@@ -78,9 +120,10 @@ SAMPLE_PSETS = {
     "Diboson": "supplement_mc_cfg.py",
     "QCDEle": "supplement_mc_cfg.py",
     "QCDMu": "supplement_mc_cfg.py",
+    "Signal": "supplement_signal_cfg.py",
 }
 
-ALL_SAMPLES = ["EGamma", "MET", "Muon", "MuonEG", "TTbar", "SingleTop", "DY", "Diboson", "QCDEle", "QCDMu"]
+ALL_SAMPLES = ["EGamma", "MET", "Muon", "MuonEG", "TTbar", "SingleTop", "DY", "Diboson", "QCDEle", "QCDMu", "Signal"]
 ALL_YEARS = ["2022preEE", "2022postEE", "2023preBPix", "2023postBPix", "2024", "2025", "2026"]
 GOLDEN_JSONS = {
     "2022preEE": "https://cms-service-dqmdc.web.cern.ch/CAF/certification/Collisions22/Cert_Collisions2022_355100_362760_Golden.json",
@@ -121,6 +164,19 @@ def _yaml_year(year):
     return year
 
 
+def list_eos_root_files(eos_dir):
+    result = subprocess.run(["xrdfs", EOS_REDIRECTOR, "ls", "-R", eos_dir], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise SystemExit("xrdfs ls -R {} failed:\n{}".format(eos_dir, result.stderr.strip()))
+    paths = sorted(line.strip() for line in result.stdout.splitlines() if line.strip().endswith(".root"))
+    if not paths:
+        raise SystemExit("No .root files found under {}".format(eos_dir))
+    names = [os.path.basename(p) for p in paths]
+    if len(set(names)) != len(names):
+        raise SystemExit("Duplicate file names under {}".format(eos_dir))
+    return ["{}/{}".format(EOS_REDIRECTOR, p) for p in paths]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -155,10 +211,17 @@ def main():
     yaml_years = {_yaml_year(y) for y in years}
 
     by_group = {}
+    eos_entries = []
     for e in dataset_defs:
         if e["sample"] not in samples or e["year"] not in yaml_years:
             continue
-        by_group.setdefault((e["sample"], e["year"], e.get("era")), []).append(e)
+        if e.get("type") == "eos":
+            eos_entries.append(e)
+        elif e.get("type") == "dataset":
+            by_group.setdefault((e["sample"], e["year"], e.get("era")), []).append(e)
+        else:
+            raise SystemExit("Entry for {} has type {!r}, expected 'dataset' or 'eos': {}".format(
+                e["sample"], e.get("type"), e["miniaod"]))
 
     entries = []
     for (sample, yaml_year, _era), group in by_group.items():
@@ -238,6 +301,31 @@ def main():
         with open(out_path, "w") as f:
             f.write(config_text)
         print("Wrote {}".format(out_path))
+
+    for e in eos_entries:
+        year = e["year"].replace("_", "")
+        name = os.path.basename(e["supplements_path"].rstrip("/"))
+        request_name = "{}_supplement_v{}".format(name, args.version)
+        input_files = list_eos_root_files(e["miniaod"])
+        py_cfg_params = [
+            "globalTag={}".format(e["global_tag"]),
+            "recomputeMuonIds={}".format(year in PRE_142X_MINIAOD_YEARS),
+        ]
+
+        config_text = EOS_CRAB_TEMPLATE \
+            .replace("{{ request_name }}", request_name) \
+            .replace("{{ pset }}", SAMPLE_PSETS[e["sample"]]) \
+            .replace("{{ py_cfg_params }}", repr(py_cfg_params)) \
+            .replace("{{ priority }}", str(args.priority)) \
+            .replace("{{ input_files }}", "[\n" + "".join("    '{}',\n".format(f) for f in input_files) + "]") \
+            .replace("{{ primary_dataset }}", name) \
+            .replace("{{ whitelist }}", repr(EOS_SITE_WHITELIST))
+
+        out_path = os.path.join(args.output_dir, "{}_cfg.py".format(request_name))
+        configs.append(os.path.basename(out_path))
+        with open(out_path, "w") as f:
+            f.write(config_text)
+        print("Wrote {} ({} files)".format(out_path, len(input_files)))
 
     bulk_submit_path = os.path.join(args.output_dir, "submit.sh")
     with open(bulk_submit_path, "w") as f:
