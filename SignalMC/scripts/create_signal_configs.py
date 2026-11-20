@@ -18,6 +18,48 @@ ERAS = {
         "mini_conditions": "150X_mcRun3_2024_realistic_v2",
         "mini_era": "Run3_2024",
     },
+    "2022": {
+        "conditions": "124X_mcRun3_2022_realistic_v12",
+        "era": "Run3",
+        "beamspot": "Realistic25ns13p6TeVEarly2022Collision",
+        "hlt": "HLT:2022v12",
+        "premix": "/Neutrino_E-10_gun/Run3Summer21PrePremix-Summer22_124X_mcRun3_2022_realistic_v11-v2/PREMIX",
+        "mini_release": "CMSSW_13_0_13",
+        "mini_conditions": "130X_mcRun3_2022_realistic_v5",
+        "mini_era": "Run3,run3_miniAOD_12X",
+        "nano_conditions": "150X_mcRun3_2022_realistic_v1",
+        "nano_era": "Run3,run3_nanoAOD_pre142X",
+    },
+    "2022EE": {
+        "conditions": "124X_mcRun3_2022_realistic_postEE_v1",
+        "era": "Run3",
+        "beamspot": "Realistic25ns13p6TeVEarly2022Collision",
+        "hlt": "HLT:2022v14",
+        "premix": "/Neutrino_E-10_gun/Run3Summer21PrePremix-Summer22_124X_mcRun3_2022_realistic_v11-v2/PREMIX",
+        "mini_release": "CMSSW_13_0_13",
+        "mini_conditions": "130X_mcRun3_2022_realistic_postEE_v6",
+        "mini_era": "Run3,run3_miniAOD_12X",
+        "nano_conditions": "150X_mcRun3_2022_realistic_postEE_v1",
+        "nano_era": "Run3,run3_nanoAOD_pre142X",
+    },
+    "2023": {
+        "conditions": "130X_mcRun3_2023_realistic_v14",
+        "era": "Run3_2023",
+        "beamspot": "Realistic25ns13p6TeVEarly2023Collision",
+        "hlt": "HLT:2023v12",
+        "premix": "/Neutrino_E-10_gun/Run3Summer21PrePremix-Summer23_130X_mcRun3_2023_realistic_v13-v1/PREMIX",
+        "mini_conditions": "150X_mcRun3_2023_realistic_v1",
+        "mini_era": "Run3_2023",
+    },
+    "2023BPix": {
+        "conditions": "130X_mcRun3_2023_realistic_postBPix_v2",
+        "era": "Run3_2023",
+        "beamspot": "Realistic25ns13p6TeVEarly2023Collision",
+        "hlt": "HLT:2023v12",
+        "premix": "/Neutrino_E-10_gun/Run3Summer21PrePremix-Summer23BPix_130X_mcRun3_2023_realistic_postBPix_v1-v1/PREMIX",
+        "mini_conditions": "150X_mcRun3_2023_realistic_postBPix_v1",
+        "mini_era": "Run3_2023",
+    },
 }
 
 HBARC_GEV_MM = 1.973269804e-13
@@ -26,6 +68,7 @@ DECAYS = [(5, -11), (5, -13), (5, -15)]
 N_PREMIX_FILES = 10000
 THREADS = 2
 KEEP_GEN_PLUS_GEANT = "keep *_genParticlePlusGeant_*_*"
+NANO_RELEASE = "CMSSW_15_0_10"
 
 # Same table as the official RunIII2024Summer24 SMS-2Stop-T2bW fragments, which use these gridpacks
 MATCH_PARAMS = [
@@ -119,7 +162,7 @@ config.JobType.pluginName = 'PrivateMC'
 config.JobType.generator = 'pythia'
 config.JobType.psetName = 'step1_{name}_cfg.py'
 config.JobType.scriptExe = '../run_gen_to_nano.sh'
-config.JobType.inputFiles = ['step2_cfg.py', 'step3_cfg.py', 'step4_cfg.py']
+config.JobType.inputFiles = {input_files}
 config.JobType.outputFiles = ['miniaod.root', 'nanoaod.root']
 config.JobType.disableAutomaticOutputCollection = True
 config.JobType.maxMemoryMB = {memory}
@@ -271,6 +314,53 @@ def step4_args(cfg):
     ]
 
 
+# As central MiniAODv4/NanoAODv15; 15_0 cannot read the HLT scouting branches written by 12_4
+def mini_args(cfg):
+    return [
+        "step4", "--python_filename", "mini_cfg.py",
+        "--filein", "file:step3.root", "--fileout", "file:miniaod.root",
+        "--mc", "--eventcontent", "MINIAODSIM", "--datatier", "MINIAODSIM",
+        "--conditions", cfg["mini_conditions"], "--geometry", "DB:Extended", "--era", cfg["mini_era"],
+        "--step", "PAT",
+        "--outputCommand", KEEP_GEN_PLUS_GEANT,
+        "--customise", "Configuration/DataProcessing/Utils.addMonitoring",
+        "--nThreads", str(THREADS), "--no_exec", "-n", "-1",
+    ]
+
+
+def nano_args(cfg):
+    return [
+        "step5", "--python_filename", "nano_cfg.py",
+        "--filein", "file:miniaod.root", "--fileout", "file:nanoaod.root",
+        "--mc", "--eventcontent", "NANOAODSIM", "--datatier", "NANOAODSIM",
+        "--conditions", cfg["nano_conditions"], "--geometry", "DB:Extended", "--era", cfg["nano_era"],
+        "--step", "NANO",
+        "--customise", "Configuration/DataProcessing/Utils.addMonitoring",
+        "--nThreads", str(THREADS), "--no_exec", "-n", "-1",
+    ]
+
+
+def last_step_configs(cfg):
+    if "mini_release" in cfg:
+        return ["mini_cfg.py", "nano_cfg.py"]
+    return ["step4_cfg.py"]
+
+
+def write_last_step_configs(cfg, year_dir):
+    release = os.environ.get("CMSSW_VERSION")
+    if "mini_release" not in cfg:
+        run_cmsdriver(step4_args(cfg), year_dir)
+        return ["step4_cfg.py"]
+    if release == cfg["mini_release"]:
+        run_cmsdriver(mini_args(cfg), year_dir)
+        return ["mini_cfg.py"]
+    if release == NANO_RELEASE:
+        run_cmsdriver(nano_args(cfg), year_dir)
+        return ["nano_cfg.py"]
+    raise RuntimeError("run --step4-config in %s (PAT) and %s (NANO), not %s"
+                       % (cfg["mini_release"], NANO_RELEASE, release))
+
+
 def write_premix_list(path, dataset, seed):
     result = subprocess.run(["dasgoclient", "-query", "file dataset=%s" % dataset],
                             capture_output=True, text=True, check=True)
@@ -300,7 +390,8 @@ def main():
         help="Write premix file lists and step1/2/3 configs (run in the GEN-to-RECO release)")
     parser.add_argument(
         "--step4-config", action="store_true",
-        help="Write the PAT+NANO config (run in the MiniAOD release, e.g. CMSSW_15_0_10)")
+        help="Write the PAT+NANO config (run in CMSSW_15_0_10), or for eras with a mini_release the "
+             "PAT config (run in mini_release) or the NANO config (run in CMSSW_15_0_10)")
     parser.add_argument("--crab", action="store_true", help="Write CRAB configs")
     parser.add_argument("--events", type=int, default=50000, help="Target events per point after matching")
     parser.add_argument("--events-per-job", type=int, default=1000, help="LHE events per job, before matching")
@@ -341,8 +432,8 @@ def main():
             print("%s: wrote step2, step3 and %i step1 configs" % (year, len(points)))
 
         if args.step4_config:
-            run_cmsdriver(step4_args(cfg), year_dir)
-            print("%s: wrote step4 config" % year)
+            written = write_last_step_configs(cfg, year_dir)
+            print("%s: wrote %s" % (year, ", ".join(written)))
 
         if args.crab:
             for mass, ctau in points:
@@ -350,6 +441,7 @@ def main():
                 text = CRAB_TEMPLATE.format(
                     request_name="StopToLB_M-%i_CTau-%smm_%s_v%i" % (mass, ctau, year, args.version),
                     name=name,
+                    input_files=["step2_cfg.py", "step3_cfg.py"] + last_step_configs(cfg),
                     memory=args.memory,
                     threads=THREADS,
                     runtime=args.runtime,
