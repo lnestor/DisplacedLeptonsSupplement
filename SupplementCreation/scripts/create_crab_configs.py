@@ -132,7 +132,8 @@ GOLDEN_JSONS = {
     "2023postBPix": "https://cms-service-dqmdc.web.cern.ch/CAF/certification/Collisions23/Cert_Collisions2023_366442_370790_Golden.json",
     "2024": "https://cms-service-dqmdc.web.cern.ch/CAF/certification/Collisions24/Cert_Collisions2024_378981_386951_Golden.json",
     # Double check 2025 here, they have several to choose from. I chose the one with the most runs
-    "2025": "https://cms-service-dqmdc.web.cern.ch/CAF/certification/Collisions25/Cert_Collisions2025_391658_398903_Golden.json"
+    "2025": "https://cms-service-dqmdc.web.cern.ch/CAF/certification/Collisions25/Cert_Collisions2025_391658_398903_Golden.json",
+    "2026": "https://cms-service-dqmdc.web.cern.ch/CAF/certification/Collisions26/Cert_Collisions2026_401624_403937_golden.json",
 }
 
 # Taken from summary slides on https://twiki.cern.ch/twiki/bin/viewauth/CMS/PdmVRun3Analysis
@@ -144,9 +145,14 @@ DATA_GLOBAL_TAGS = {
     "2023postBPix": "130X_dataRun3_PromptAnalysis_v1",
     "2024": "150X_dataRun3_v2",
     "2025": "150X_dataRun3_Prompt_v1",
+    "2026": "160X_dataRun3_Prompt_v1",
 }
 
 PRE_142X_MINIAOD_YEARS = {"2022preEE", "2022postEE", "2023preBPix", "2023postBPix"}
+
+
+def _recompute_muon_ids(year, nanoaod_version):
+    return year in PRE_142X_MINIAOD_YEARS and nanoaod_version >= 15
 
 LOWERED_MUON_PT_YEARS = {"2025", "2026"}
 
@@ -155,6 +161,14 @@ LOWERED_MUON_PT_YEARS = {"2025", "2026"}
 # drops what central keeps). Only EGamma is affected, and only 2025 has been
 # confirmed to need it.
 EGAMMA_PT_BOUNDARY_FIX_YEARS = {"2025"}
+
+
+def _effective_yaml_year(entry):
+    # 2026B/2026D data are stored in the yaml as eras of 2025, but need their own
+    # golden JSON and global tag
+    if str(entry.get("era") or "").startswith("2026"):
+        return "2026"
+    return entry["year"]
 
 
 def _yaml_year(year):
@@ -213,12 +227,13 @@ def main():
     by_group = {}
     eos_entries = []
     for e in dataset_defs:
-        if e["sample"] not in samples or e["year"] not in yaml_years:
+        entry_year = _effective_yaml_year(e)
+        if e["sample"] not in samples or entry_year not in yaml_years:
             continue
         if e.get("type") == "eos":
             eos_entries.append(e)
         elif e.get("type") == "dataset":
-            by_group.setdefault((e["sample"], e["year"], e.get("era")), []).append(e)
+            by_group.setdefault((e["sample"], entry_year, e.get("era")), []).append(e)
         else:
             raise SystemExit("Entry for {} has type {!r}, expected 'dataset' or 'eos': {}".format(
                 e["sample"], e.get("type"), e["miniaod"]))
@@ -234,14 +249,14 @@ def main():
                 prim_counts[prim] = prim_counts.get(prim, 0) + 1
             for e in group:
                 prim = e["miniaod"].strip("/").split("/")[0]
-                entries.append((sample, year, e["miniaod"], prim_counts[prim] > 1, None))
+                entries.append((sample, year, e["miniaod"], prim_counts[prim] > 1, None, e["nanoaod_version"]))
         else:
             for e in group:
-                entries.append((sample, year, e["miniaod"], False, e["global_tag"]))
+                entries.append((sample, year, e["miniaod"], False, e["global_tag"], e["nanoaod_version"]))
 
     configs = []
     os.makedirs(args.output_dir, exist_ok=True)
-    for sample, year, dataset, multi_version, mc_global_tag in entries:
+    for sample, year, dataset, multi_version, mc_global_tag, nanoaod_version in entries:
         is_data = sample in DATA_SAMPLES
         prim_dataset, acq_block, _tier = dataset.strip("/").split("/")
 
@@ -253,8 +268,8 @@ def main():
             # any trailing _vN off the processing tag and fold it in.
             acq_parts = acq_block.split("-")
             era = acq_parts[0]
-            if year == "2025":
-                # 2025 datasets use 'PromptReco' as the processing tag with
+            if year in ("2025", "2026"):
+                # 2025 and 2026 datasets use 'PromptReco' as the processing tag with
                 # no embedded version, unlike 2023/2024I. The only
                 # differentiator is the trailing DBS version (e.g. 'v1'),
                 # which is present on every dataset regardless of whether
@@ -284,7 +299,7 @@ def main():
         else:
             py_cfg_params = [
                 "globalTag={}".format(global_tag),
-                "recomputeMuonIds={}".format(year in PRE_142X_MINIAOD_YEARS),
+                "recomputeMuonIds={}".format(_recompute_muon_ids(year, nanoaod_version)),
             ]
 
         config_text = (DATA_CRAB_TEMPLATE if is_data else MC_CRAB_TEMPLATE) \
@@ -309,7 +324,7 @@ def main():
         input_files = list_eos_root_files(e["miniaod"])
         py_cfg_params = [
             "globalTag={}".format(e["global_tag"]),
-            "recomputeMuonIds={}".format(year in PRE_142X_MINIAOD_YEARS),
+            "recomputeMuonIds={}".format(e.get("recompute_muon_ids", _recompute_muon_ids(year, e["nanoaod_version"]))),
         ]
 
         config_text = EOS_CRAB_TEMPLATE \
